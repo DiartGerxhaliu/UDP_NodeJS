@@ -16,3 +16,13 @@ const server = dgram.createSocket('udp4');
 const clients = {};
 const uploads = {};
 
+
+
+function send(address, port, packet) {
+  server.send(Buffer.from(JSON.stringify(packet)), port, address);
+}
+
+function sendError(address, port, message, requestId) {
+  send(address, port, { type: 'error', message, requestId });
+}
+
