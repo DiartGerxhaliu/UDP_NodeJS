@@ -42,3 +42,24 @@ function getSafePath(relativePath = '.') {
 }
 
 
+function splitIntoChunks(buffer) {
+  const chunks = [];
+
+  for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
+    chunks.push(buffer.subarray(i, i + CHUNK_SIZE).toString('base64'));
+  }
+
+  return chunks.length ? chunks : [''];
+}
+
+
+function checkPermission(client, command) {
+  if (client.role === 'admin') return;
+
+  if (['upload', 'delete', 'exec'].includes(command)) {
+    throw new Error('This command needs admin privileges.');
+  }
+}
+
+
+
