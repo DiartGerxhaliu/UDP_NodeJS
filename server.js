@@ -26,3 +26,19 @@ function sendError(address, port, message, requestId) {
   send(address, port, { type: 'error', message, requestId });
 }
 
+function getActiveCount() {
+  return Object.values(clients).filter((client) => client.active).length;
+}
+
+function getSafePath(relativePath = '.') {
+  const fullPath = path.resolve(STORAGE_DIR, relativePath);
+  const root = `${STORAGE_DIR}${path.sep}`;
+
+  if (fullPath !== STORAGE_DIR && !fullPath.startsWith(root)) {
+    throw new Error('Only files inside server-data are allowed.');
+  }
+
+  return fullPath;
+}
+
+
