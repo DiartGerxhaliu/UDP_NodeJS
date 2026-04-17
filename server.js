@@ -131,4 +131,22 @@ server.on('message', async (buffer, rinfo) => {
   }
 });
 
+async function start() {
+  await fsp.mkdir(STORAGE_DIR, { recursive: true });
+
+  const welcomeFile = path.join(STORAGE_DIR, 'welcome.txt');
+  if (!fs.existsSync(welcomeFile)) {
+    await fsp.writeFile(welcomeFile, 'Welcome to the UDP server folder.');
+  }
+
+  server.bind(UDP_PORT, SERVER_IP, () => {
+    console.log(`UDP server listening on ${SERVER_IP}:${UDP_PORT}`);
+  });
+
+  setInterval(cleanup, 2000).unref();
+}
+
+start();
+
+
 
