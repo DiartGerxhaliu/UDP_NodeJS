@@ -63,3 +63,40 @@ function checkPermission(client, command) {
 
 
 
+function connectClient(packet, rinfo) {
+  const current = clients[packet.clientId];
+
+  if (!current && getActiveCount() >= MAX_CLIENTS) {
+  
+    sendError(rinfo.address, rinfo.port, 'Server is full right now.');
+    return;
+  }
+
+  const now = Date.now();
+  const timedOut = current && now - current.lastSeen > CLIENT_TIMEOUT;
+  const role = packet.wantAdmin && packet.token === ADMIN_TOKEN ? 'admin' : 'reader';
+  const reconnected = current && (!current.active || timedOut);
+
+  clients[packet.clientId] = current || {
+    id: packet.clientId,
+    name: packet.name || packet.clientId,
+    joinedAt: now,
+    messageCount: 0,
+    commandCount: 0,
+  };
+
+  clients[packet.clientId].name = packet.name || clients[packet.clientId].name;
+  clients[packet.clientId].address = rinfo.address;
+  clients[packet.clientId].port = rinfo.port;
+  clients[packet.clientId].role = role;
+  clients[packet.clientId].lastSeen = now;
+  clients[packet.clientId].active = true;
+
+  send(rinfo.address, rinfo.port, {
+    type: 'reply',
+    action: 'connectMsg',
+    role,
+    message: reconnected ? 'Client reconnected.' : 'Client connected.',
+  });
+}
+
