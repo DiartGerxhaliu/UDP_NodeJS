@@ -100,3 +100,17 @@ function connectClient(packet, rinfo) {
   });
 }
 
+function updateClientActivity(packet, rinfo) {
+  const client = clients[packet.clientId];
+
+  if (!client) {
+    sendError(rinfo.address, rinfo.port, 'Send connectMsg first.', packet.requestId);
+    return null;
+  }
+
+  client.address = rinfo.address;
+  client.port = rinfo.port;
+  client.lastSeen = Date.now();
+  client.active = true;
+  return client;
+}
