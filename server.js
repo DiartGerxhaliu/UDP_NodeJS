@@ -114,3 +114,21 @@ function updateClientActivity(packet, rinfo) {
   client.active = true;
   return client;
 }
+
+server.on('message', async (buffer, rinfo) => {
+  try {
+    const packet = JSON.parse(buffer.toString());
+
+    if (packet.type === 'connectMsg') return connectClient(packet, rinfo);
+    if (packet.type === 'Ping') return updateClientActivity(packet, rinfo);
+    if (packet.type === 'text') return handleText(packet, rinfo);
+    if (packet.type === 'uploadChunk') return handleUploadChunk(packet, rinfo);
+    if (packet.type === 'command') return handleCommand(packet, rinfo);
+
+    sendError(rinfo.address, rinfo.port, 'Unknown packet type.');
+  } catch (error) {
+    sendError(rinfo.address, rinfo.port, 'Invalid packet received.');
+  }
+});
+
+
