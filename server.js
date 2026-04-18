@@ -2,6 +2,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const SERVER_IP = process.env.SERVER_IP || '127.0.0.1';
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
@@ -50,6 +51,24 @@ function splitIntoChunks(buffer) {
   }
 
   return chunks.length ? chunks : [''];
+}
+
+async function getAllFiles(folder, base = '') {
+  const entries = await fsp.readdir(folder, { withFileTypes: true });
+  const result = [];
+
+  for (const entry of entries) {
+    const nextBase = path.join(base, entry.name);
+    const nextPath = path.join(folder, entry.name);
+
+    if (entry.isDirectory()) {
+      result.push(...await getAllFiles(nextPath, nextBase));
+    } else {
+      result.push(nextBase);
+    }
+  }
+
+  return result;
 }
 
 
@@ -146,55 +165,6 @@ async function start() {
   setInterval(cleanup, 2000).unref();
 }
 
+
 start();
-
-const { execFile } = require('child_process');
-
-async function getAllFiles(folder, base = '') {
-  const entries = await fsp.readdir(folder, { withFileTypes: true });
-  const result = [];
-
-  for (const entry of entries) {
-    const nextBase = path.join(base, entry.name);
-    const nextPath = path.join(folder, entry.name);
-
-    if (entry.isDirectory()) {
-      result.push(...await getAllFiles(nextPath, nextBase));
-    } else {
-      result.push(nextBase);
-    }
-  }
-
-  return result;
-}
-
-async function handleUploadChunk(packet, rinfo) {
-  const client = updateClientActivity(packet, rinfo);
-  if (!client) return;
-
-  const upload = uploads[packet.transferId];
-  if (!upload || upload.clientId !== client.id) {
-    sendError(rinfo.address, rinfo.port, 'Upload session not found.', packet.requestId);
-    return;
-  }
-
-  upload.chunks[packet.index] = packet.data || '';
-
-  if (!upload.chunks.every((chunk) => typeof chunk === 'string')) return;
-
-  const buffer = Buffer.concat(upload.chunks.map((chunk) => Buffer.from(chunk, 'base64')));
-  const filePath = getSafePath(upload.fileName);
-
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, buffer);
-  delete uploads[packet.transferId];
-
-  send(rinfo.address, rinfo.port, {
-    type: 'reply',
-    action: 'upload',
-    message: `Uploaded ${upload.fileName}.`,
-    bytes: buffer.length,
-    requestId: upload.requestId,
-  });
-}
 
