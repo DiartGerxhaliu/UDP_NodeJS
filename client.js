@@ -175,3 +175,37 @@ async function handlePacket(packet) {
 
   console.log(packet.message);
 }
+
+socket.on('message', async (buffer) => {
+  try {
+    await handlePacket(JSON.parse(buffer.toString()));
+  } catch (error) {
+    console.log(`Invalid response: ${error.message}`);
+  }
+});
+
+socket.bind(() => {
+  console.log(`Client started: ${clientName}`);
+  console.log(`Client ID: ${clientId}`);
+  console.log(`Server: ${serverHost}:${serverPort}`);
+  showHelp();
+  connectMsg();
+
+  setInterval(() => {
+    send({ type: 'Ping', clientId });
+  }, 10000).unref();
+});
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: true,
+});
+
+rl.on('line', async (line) => {
+  try {
+    await runLine(line);
+  } catch (error) {
+    console.log(`Error: ${error.message}`);
+  }
+});
