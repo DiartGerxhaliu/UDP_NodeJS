@@ -150,6 +150,40 @@ server.on('message', async (buffer, rinfo) => {
   }
 });
 
+
+async function handleUploadChunk(packet, rinfo) {
+  const client = updateClientActivity(packet, rinfo);
+  if (!client) return;
+
+  const upload = uploads[packet.transferId];
+  if (!upload || upload.clientId !== client.id) {
+    sendError(rinfo.address, rinfo.port, 'Upload session not found.', packet.requestId);
+    return;
+  }
+
+  upload.chunks[packet.index] = packet.data || '';
+
+  if (!upload.chunks.every((chunk) => typeof chunk === 'string')) return;
+
+  const buffer = Buffer.concat(upload.chunks.map((chunk) => Buffer.from(chunk, 'base64')));
+  const filePath = getSafePath(upload.fileName);
+
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, buffer);
+  delete uploads[packet.transferId];
+
+  saveLog(`${client.id}: uploaded ${upload.fileName}`);
+
+  send(rinfo.address, rinfo.port, {
+    type: 'reply',
+    action: 'upload',
+    message: `Uploaded ${upload.fileName}.`,
+    bytes: buffer.length,
+    requestId: upload.requestId,
+  });
+}
+
+
 async function start() {
   await fsp.mkdir(STORAGE_DIR, { recursive: true });
 
