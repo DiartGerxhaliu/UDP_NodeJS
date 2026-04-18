@@ -115,6 +115,18 @@ function updateClientActivity(packet, rinfo) {
   return client;
 }
 
+async function handleText(packet, rinfo) {
+  const client = updateClientActivity(packet, rinfo);
+  if (!client) return;
+
+  send(rinfo.address, rinfo.port, {
+    type: 'reply',
+    action: 'text',
+    message: 'Message saved on server.',
+    requestId: packet.requestId,
+  });
+}
+
 server.on('message', async (buffer, rinfo) => {
   try {
     const packet = JSON.parse(buffer.toString());
@@ -122,8 +134,6 @@ server.on('message', async (buffer, rinfo) => {
     if (packet.type === 'connectMsg') return connectClient(packet, rinfo);
     if (packet.type === 'Ping') return updateClientActivity(packet, rinfo);
     if (packet.type === 'text') return handleText(packet, rinfo);
-    if (packet.type === 'uploadChunk') return handleUploadChunk(packet, rinfo);
-    if (packet.type === 'command') return handleCommand(packet, rinfo);
 
     sendError(rinfo.address, rinfo.port, 'Unknown packet type.');
   } catch (error) {
