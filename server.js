@@ -148,5 +148,25 @@ async function start() {
 
 start();
 
+const { execFile } = require('child_process');
+
+async function getAllFiles(folder, base = '') {
+  const entries = await fsp.readdir(folder, { withFileTypes: true });
+  const result = [];
+
+  for (const entry of entries) {
+    const nextBase = path.join(base, entry.name);
+    const nextPath = path.join(folder, entry.name);
+
+    if (entry.isDirectory()) {
+      result.push(...await getAllFiles(nextPath, nextBase));
+    } else {
+      result.push(nextBase);
+    }
+  }
+
+  return result;
+}
+
 
 
