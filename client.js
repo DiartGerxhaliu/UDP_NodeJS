@@ -1,47 +1,18 @@
 const dgram = require('dgram');
 const readline = require('readline');
+const crypto = require('crypto');
 
-const HOST = 'localhost';
-const PORT = 4444;
+const DEFAULT_SERVER_IP = '127.0.0.1';
+const DEFAULT_UDP_PORT = 41234;
 
-const client = dgram.createSocket('udp4');
+const args = process.argv.slice(2);
+const clientName = getArg('--name', `client-${process.pid}`);
+const clientId = getArg('--id', crypto.randomUUID());
+const wantAdmin = getArg('--role', 'reader') === 'admin';
+const token = getArg('--token', '');
+const serverHost = getArg('--host', DEFAULT_SERVER_IP);
+const serverPort = Number(getArg('--port', String(DEFAULT_UDP_PORT)));
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+const socket = dgram.createSocket('udp4');
 
-function send(msg) {
-  const buf = Buffer.from(msg);
-  client.send(buf, 0, buf.length, PORT, HOST, (err) => {
-    if (err) console.log('[Error]', err.message);
-  });
-}
-
-client.on('message', (msg) => {
-  try {
-    const parsed = JSON.parse(msg.toString());
-    console.log(JSON.stringify(parsed, null, 2));
-  } catch {
-    console.log(msg.toString());
-  }
-  prompt();
-});
-
-function prompt() {
-  rl.question('> ', (input) => {
-    if (input === '/exit') {
-      client.close();
-      rl.close();
-      process.exit(0);
-    }
-    send(input);
-  });
-}
-
-console.log('Connected to', HOST, ':', PORT);
-console.log('Commands: /list /read /info /search /delete /upload /download');
-console.log('Type /exit to quit\n');
-
-send('HELLO');
-prompt();
+let currentRole = 'reader';
