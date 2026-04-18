@@ -199,6 +199,152 @@ async function start() {
   setInterval(cleanup, 2000).unref();
 }
 
+async function runCommand(client, packet, rinfo) {
+  const command = packet.command;
+  const value = packet.value || '';
+
+  checkPermission(client, command);
+
+  if (command === 'list') {
+    const entries = await fsp.readdir(getSafePath(value || '.'), { withFileTypes: true });
+    return {
+      type: 'reply',
+      action: 'list',
+      message: 'Directory listed successfully.',
+      data: entries.map((entry) => ({
+        name: entry.name,
+        type: entry.isDirectory() ? 'dir' : 'file',
+      })),
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'read') {
+    const content = await fsp.readFile(getSafePath(value), 'utf8');
+    return {
+      type: 'reply',
+      action: 'read',
+      message: 'File read successfully.',
+      data: content,
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'upload') {
+    uploads[packet.transferId] = {
+      clientId: client.id,
+      fileName: packet.fileName,
+      requestId: packet.requestId,
+      chunks: new Array(packet.totalChunks),
+      startedAt: Date.now(),
+    };
+
+    return {
+      type: 'reply',
+      action: 'upload',
+      stage: 'ready',
+      message: `Ready to receive ${packet.fileName}.`,
+      transferId: packet.transferId,
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'download') {
+    const fileName = path.basename(value);
+    const buffer = await fsp.readFile(getSafePath(value));
+    const chunks = splitIntoChunks(buffer);
+    const transferId = `${Date.now()}-${Math.random()}`;
+
+    for (let i = 0; i < chunks.length; i += 1) {
+      send(rinfo.address, rinfo.port, {
+        type: 'downloadChunk',
+        transferId,
+        fileName,
+        index: i,
+        totalChunks: chunks.length,
+        data: chunks[i],
+      });
+    }
+
+    return {
+      type: 'reply',
+      action: 'download',
+      message: `Download for ${value} sent.`,
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'delete') {
+    await fsp.unlink(getSafePath(value));
+    return {
+      type: 'reply',
+      action: 'delete',
+      message: `Deleted ${value}.`,
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'search') {
+    const files = await getAllFiles(STORAGE_DIR);
+    const matches = files.filter((file) => file.toLowerCase().includes(value.toLowerCase()));
+    return {
+      type: 'reply',
+      action: 'search',
+      message: 'Search finished.',
+      data: matches,
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'info') {
+    const stats = await fsp.stat(getSafePath(value));
+    return {
+      type: 'reply',
+      action: 'info',
+      message: 'File info loaded.',
+      data: {
+        size: stats.size,
+        createdAt: stats.birthtime,
+        modifiedAt: stats.mtime,
+      },
+      requestId: packet.requestId,
+    };
+  }
+
+  if (command === 'exec') {
+    const filePath = getSafePath(value);
+    const ext = path.extname(filePath).toLowerCase();
+    let runFile;
+    let args;
+
+    if (ext === '.js') {
+      runFile = process.execPath;
+      args = [filePath];
+    } else if (ext === '.py') {
+      runFile = 'python';
+      args = [filePath];
+    } else {
+      throw new Error('Only .js and .py files can be executed.');
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      execFile(runFile, args, { timeout: 5000 }, (error, stdout, stderr) => {
+        if (error) reject(error);
+        else resolve({ stdout, stderr });
+      });
+    });
+
+    return {
+      type: 'reply',
+      action: 'exec',
+      message: `Executed ${value}.`,
+      data: result,
+      requestId: packet.requestId,
+    };
+  }
+
+  throw new Error('Unknown command.');
+}
 
 start();
 
