@@ -1,77 +1,128 @@
-"# UDP Socket Server
+# UDP Socket Server
 
-A simple UDP socket server with file management and HTTP monitoring.
+Një server i thjeshtë UDP me menaxhim të skedarëve dhe monitorim përmes HTTP.
+
+---
 
 ## Setup
 
-Just run the server:
+Startoni serverin:
+
 ```bash
 node server.js
 ```
 
-In another terminal, run a client:
+Në një terminal tjetër startoni klientin:
+
 ```bash
 node client.js
 ```
 
-That's it. The server creates a `shared/` folder for files.
+Për akses si admin:
 
-## Commands
+```bash
+node client.js --role admin --token admin-secret
+```
 
-### Admin (first client)
-- `/list` - show files
-- `/read filename` - read file
-- `/info filename` - file info
-- `/search keyword` - find files
-- `/delete filename` - delete file
-- `/upload filename` - upload file
-- `/download filename` - download file
+Serveri krijon automatikisht folderin `server-data/` për ruajtjen e skedarëve.
 
-### Regular Users
-- `/list` - show files
-- `/read filename` - read file
-- `/info filename` - file info
-- `/search keyword` - find files
+---
 
-Only admin can delete, upload, download.
+## Komandat
+
+### Komandat e disponueshme
+
+```
+/list [folder]        - shfaq skedarët
+/read <filename>      - lexon një file
+/info <filename>      - jep info për file
+/search <keyword>     - kërkon file
+/download <filename>  - shkarkon file
+
+/upload <path>        - ngarkon file (vetëm admin)
+/delete <filename>    - fshin file (vetëm admin)
+/exec <filename>      - ekzekuton file .js ose .py (vetëm admin)
+
+/reconnect            - rilidh klientin
+/help                 - shfaq komandat
+/quit                 - mbyll klientin
+```
+
+---
+
+## Rolet
+
+Ka dy role:
+
+* **reader (default)**
+
+  * mund të listojë, lexojë, kërkojë dhe shkarkojë file
+
+* **admin**
+
+  * ka akses të plotë (upload, delete, exec)
+
+Admin nuk jepet automatikisht — duhet të jepet token i saktë gjatë nisjes së klientit.
+
+---
 
 ## HTTP Stats
 
-Check what's connected:
+Për të parë statusin e serverit:
+
 ```bash
 curl http://localhost:8080/stats
 ```
 
-Returns JSON with:
-- how many clients connected
-- max clients (10)
-- which clients and if they're admin
+Kthen JSON me:
 
-## How it works
+* klientët aktivë
+* numrin total të mesazheve dhe komandave
+* klientët e refuzuar
+* logs
+* informacion për klientët (role, IP, aktivitet)
 
-1. Server listens on port 4444 (UDP)
-2. First client that connects becomes admin
-3. Other clients are read-only
-4. All file stuff happens in the `shared/` folder
-5. HTTP server on 8080 shows stats
+---
 
-## Requirements Met
+## Si funksionon
 
-✓ Server listens on port 4444
-✓ Max 10 clients, refuses more
-✓ Can handle multiple clients
-✓ Reads messages from clients
-✓ Admin client with full access
-✓ Users get read-only access
-✓ File operations: list, read, delete, search, info
-✓ HTTP monitoring on port 8080
-✓ Shows stats in JSON
-✓ Socket connection works properly
-✓ Sends/receives messages correctly
+* Serveri dëgjon në portin UDP **41234**
+* HTTP server punon në portin **8080**
+* Numri maksimal i klientëve është **3** (default)
+* Klientët dërgojnë mesazhe dhe komanda përmes UDP
+* Serveri i përpunon dhe kthen përgjigje
+* Skedarët ruhen në folderin `server-data/`
 
-## Files
+---
 
-- `server.js` - the UDP server
-- `client.js` - the client
-- `shared/` - where files go
-- `README.md` - this file" 
+## Transferimi i skedarëve
+
+* Skedarët ndahen në pjesë (chunks) prej 4096 bytes
+* Dërgohen në format Base64
+* Ribashkohen në destinacion
+
+---
+
+## Kërkesat e realizuara
+
+✓ Server UDP funksional
+✓ Menaxhon shumë klientë
+✓ Kufizon numrin e klientëve
+✓ Mbështet role (admin / reader)
+✓ Operacione me file: list, read, upload, download, delete, search, info
+✓ Ekzekuton file `.js` dhe `.py`
+✓ Monitorim me HTTP në portin 8080
+✓ Statistika në format JSON
+✓ Menaxhon reconnect dhe timeout
+
+---
+
+## Skedarët
+
+```
+server.js           - serveri UDP
+client.js           - klienti
+server-data/        - skedarët në server
+client-downloads/   - skedarët e shkarkuar
+README.md           - ky dokument
+```
