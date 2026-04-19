@@ -48,3 +48,19 @@ async function finishDownload(transferId) {
   delete downloads[transferId];
   console.log(`Downloaded file saved to ${filePath}`);
 }
+
+function showHelp() {
+  console.log('');
+  console.log('/list [folder]');
+  console.log('/read <filename>');
+  console.log('/upload <localPath>');
+  console.log('/download <filename>');
+  console.log('/delete <filename>');
+  console.log('/search <keyword>');
+  console.log('/info <filename>');
+  console.log('/exec <filename>');
+  console.log('/reconnect');
+  console.log('/quit');
+  console.log('Any other text is sent as a normal message.');
+  console.log('');
+}
