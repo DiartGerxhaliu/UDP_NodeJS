@@ -1,9 +1,13 @@
 const dgram = require('dgram');
 const readline = require('readline');
 const crypto = require('crypto');
+const fsp = require('fs/promises');
+const path = require('path');
 
 const DEFAULT_SERVER_IP = '127.0.0.1';
 const DEFAULT_UDP_PORT = 41234;
+const CHUNK_SIZE = 4096;
+const DOWNLOAD_DIR = path.join(__dirname, 'client-downloads');
 
 const args = process.argv.slice(2);
 const clientName = getArg('--name', `client-${process.pid}`);
@@ -14,8 +18,11 @@ const serverHost = getArg('--host', DEFAULT_SERVER_IP);
 const serverPort = Number(getArg('--port', String(DEFAULT_UDP_PORT)));
 
 const socket = dgram.createSocket('udp4');
-
+const uploads = {};
+const downloads = {};
 let currentRole = 'reader';
+
+
 
 function getArg(flag, fallback) {
   const index = args.indexOf(flag);
@@ -29,6 +36,47 @@ function send(packet) {
 function newId() {
   return crypto.randomUUID();
 }
+
+
+function splitIntoChunks(buffer) {
+  const chunks = [];
+
+  for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
+    chunks.push(buffer.subarray(i, i + CHUNK_SIZE).toString('base64'));
+  }
+
+  return chunks.length ? chunks : [''];
+}
+
+function sendCommand(command, value = '', extra = {}) {
+  send({
+    type: 'command',
+    clientId,
+    requestId: newId(),
+    command,
+    value,
+    ...extra,
+  });
+}
+
+
+async function finishDownload(transferId) {
+  const item = downloads[transferId];
+  if (!item) return;
+
+  if (!item.chunks.every((chunk) => typeof chunk === 'string')) return;
+
+  await fsp.mkdir(DOWNLOAD_DIR, { recursive: true });
+
+  const filePath = path.join(DOWNLOAD_DIR, item.fileName);
+  const buffer = Buffer.concat(item.chunks.map((chunk) => Buffer.from(chunk, 'base64')));
+
+  await fsp.writeFile(filePath, buffer);
+  delete downloads[transferId];
+  console.log(`Downloaded file saved to ${filePath}`);
+
+
+
 
 function connectMsg() {
   send({
@@ -65,32 +113,7 @@ function showHelp() {
   console.log('');
 }
 
-async function runLine(line) {
-  const text = line.trim();
-  if (!text) return;
 
-  if (!text.startsWith('/')) {
-    sendText(text);
-    return;
-  }
-
-  const parts = text.split(' ');
-  const command = parts[0];
-  const value = parts.slice(1).join(' ');
-
-  if (command === '/list') return sendCommand('list', value || '.');
-  if (command === '/read') return sendCommand('read', value);
-  if (command === '/download') return sendCommand('download', value);
-  if (command === '/delete') return sendCommand('delete', value);
-  if (command === '/search') return sendCommand('search', value);
-  if (command === '/info') return sendCommand('info', value);
-  if (command === '/exec') return sendCommand('exec', value);
-  if (command === '/reconnect') return connectMsg();
-  if (command === '/help') return showHelp();
-  if (command === '/quit') return process.exit(0);
-
-  console.log('Unknown command. Use /help.');
-}
 
 async function handlePacket(packet) {
   if (packet.type === 'error') {
@@ -176,6 +199,76 @@ async function handlePacket(packet) {
   console.log(packet.message);
 }
 
+async function runLine(line) {
+  const text = line.trim();
+  if (!text) return;
+
+  if (!text.startsWith('/')) {
+    sendText(text);
+    return;
+  }
+
+  const parts = text.split(' ');
+  const command = parts[0];
+  const value = parts.slice(1).join(' ');
+
+  if (command === '/list') return sendCommand('list', value || '.');
+  if (command === '/read') return sendCommand('read', value);
+  if (command === '/download') return sendCommand('download', value);
+  if (command === '/delete') return sendCommand('delete', value);
+  if (command === '/search') return sendCommand('search', value);
+  if (command === '/info') return sendCommand('info', value);
+  if (command === '/exec') return sendCommand('exec', value);
+  if (command === '/reconnect') return connectMsg();
+  if (command === '/help') return showHelp();
+  if (command === '/quit') return process.exit(0);
+
+  if (command === '/upload') {
+    const filePath = path.resolve(value);
+    const buffer = await fsp.readFile(filePath);
+    const transferId = newId();
+
+    uploads[transferId] = {
+      requestId: newId(),
+      chunks: splitIntoChunks(buffer),
+    };
+
+    send({
+      type: 'command',
+      clientId,
+      requestId: uploads[transferId].requestId,
+      command: 'upload',
+      fileName: path.basename(filePath),
+      transferId,
+      totalChunks: uploads[transferId].chunks.length,
+    });
+    return;
+  }
+
+  console.log('Unknown command. Use /help.');
+}
+
+if (command === '/upload') {
+    const filePath = path.resolve(value);
+    const buffer = await fsp.readFile(filePath);
+    const transferId = newId();
+
+    uploads[transferId] = {
+      requestId: newId(),
+      chunks: splitIntoChunks(buffer),
+    };
+
+    send({
+      type: 'command',
+      clientId,
+      requestId: uploads[transferId].requestId,
+      command: 'upload',
+      fileName: path.basename(filePath),
+      transferId,
+      totalChunks: uploads[transferId].chunks.length,
+    });
+    return;
+  }
 socket.on('message', async (buffer) => {
   try {
     await handlePacket(JSON.parse(buffer.toString()));
