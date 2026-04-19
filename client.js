@@ -1,14 +1,41 @@
-
+const dgram = require('dgram');
+const readline = require('readline');
+const crypto = require('crypto');
 const fsp = require('fs/promises');
 const path = require('path');
 
-
+const DEFAULT_SERVER_IP = '127.0.0.1';
+const DEFAULT_UDP_PORT = 41234;
 const CHUNK_SIZE = 4096;
 const DOWNLOAD_DIR = path.join(__dirname, 'client-downloads');
 
+const args = process.argv.slice(2);
+const clientName = getArg('--name', `client-${process.pid}`);
+const clientId = getArg('--id', crypto.randomUUID());
+const wantAdmin = getArg('--role', 'reader') === 'admin';
+const token = getArg('--token', '');
+const serverHost = getArg('--host', DEFAULT_SERVER_IP);
+const serverPort = Number(getArg('--port', String(DEFAULT_UDP_PORT)));
 
+const socket = dgram.createSocket('udp4');
 const uploads = {};
 const downloads = {};
+let currentRole = 'reader';
+
+
+
+function getArg(flag, fallback) {
+  const index = args.indexOf(flag);
+  return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
+}
+
+function send(packet) {
+  socket.send(Buffer.from(JSON.stringify(packet)), serverPort, serverHost);
+}
+
+function newId() {
+  return crypto.randomUUID();
+}
 
 
 function splitIntoChunks(buffer) {
@@ -47,6 +74,27 @@ async function finishDownload(transferId) {
   await fsp.writeFile(filePath, buffer);
   delete downloads[transferId];
   console.log(`Downloaded file saved to ${filePath}`);
+
+
+
+
+function connectMsg() {
+  send({
+    type: 'connectMsg',
+    clientId,
+    name: clientName,
+    wantAdmin,
+    token,
+  });
+}
+
+function sendText(text) {
+  send({
+    type: 'text',
+    clientId,
+    requestId: newId(),
+    text,
+  });
 }
 
 function showHelp() {
@@ -64,6 +112,8 @@ function showHelp() {
   console.log('Any other text is sent as a normal message.');
   console.log('');
 }
+
+
 
 async function handlePacket(packet) {
   if (packet.type === 'error') {
@@ -219,3 +269,36 @@ if (command === '/upload') {
     });
     return;
   }
+socket.on('message', async (buffer) => {
+  try {
+    await handlePacket(JSON.parse(buffer.toString()));
+  } catch (error) {
+    console.log(`Invalid response: ${error.message}`);
+  }
+});
+
+socket.bind(() => {
+  console.log(`Client started: ${clientName}`);
+  console.log(`Client ID: ${clientId}`);
+  console.log(`Server: ${serverHost}:${serverPort}`);
+  showHelp();
+  connectMsg();
+
+  setInterval(() => {
+    send({ type: 'Ping', clientId });
+  }, 10000).unref();
+});
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: true,
+});
+
+rl.on('line', async (line) => {
+  try {
+    await runLine(line);
+  } catch (error) {
+    console.log(`Error: ${error.message}`);
+  }
+});
