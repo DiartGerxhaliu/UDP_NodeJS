@@ -88,7 +88,7 @@ Kthen JSON me:
 
 * Serveri dëgjon në portin UDP **41234**
 * HTTP server punon në portin **8080**
-* Numri maksimal i klientëve është **3** (default)
+* Numri maksimal i klientëve është **5** (default)
 * Klientët dërgojnë mesazhe dhe komanda përmes UDP
 * Serveri i përpunon dhe kthen përgjigje
 * Skedarët ruhen në folderin `server-data/`
