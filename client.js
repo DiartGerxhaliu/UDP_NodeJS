@@ -1,8 +1,8 @@
 const dgram = require('dgram');
 const readline = require('readline');
-const crypto = require('crypto');
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 
 const DEFAULT_SERVER_IP = '127.0.0.1';
 const DEFAULT_UDP_PORT = 41234;
@@ -22,8 +22,6 @@ const uploads = {};
 const downloads = {};
 let currentRole = 'reader';
 
-
-
 function getArg(flag, fallback) {
   const index = args.indexOf(flag);
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
@@ -37,7 +35,6 @@ function newId() {
   return crypto.randomUUID();
 }
 
-
 function splitIntoChunks(buffer) {
   const chunks = [];
 
@@ -47,36 +44,6 @@ function splitIntoChunks(buffer) {
 
   return chunks.length ? chunks : [''];
 }
-
-function sendCommand(command, value = '', extra = {}) {
-  send({
-    type: 'command',
-    clientId,
-    requestId: newId(),
-    command,
-    value,
-    ...extra,
-  });
-}
-
-
-async function finishDownload(transferId) {
-  const item = downloads[transferId];
-  if (!item) return;
-
-  if (!item.chunks.every((chunk) => typeof chunk === 'string')) return;
-
-  await fsp.mkdir(DOWNLOAD_DIR, { recursive: true });
-
-  const filePath = path.join(DOWNLOAD_DIR, item.fileName);
-  const buffer = Buffer.concat(item.chunks.map((chunk) => Buffer.from(chunk, 'base64')));
-
-  await fsp.writeFile(filePath, buffer);
-  delete downloads[transferId];
-  console.log(`Downloaded file saved to ${filePath}`);
-
-
-
 
 function connectMsg() {
   send({
@@ -97,6 +64,17 @@ function sendText(text) {
   });
 }
 
+function sendCommand(command, value = '', extra = {}) {
+  send({
+    type: 'command',
+    clientId,
+    requestId: newId(),
+    command,
+    value,
+    ...extra,
+  });
+}
+
 function showHelp() {
   console.log('');
   console.log('/list [folder]');
@@ -113,7 +91,21 @@ function showHelp() {
   console.log('');
 }
 
+async function finishDownload(transferId) {
+  const item = downloads[transferId];
+  if (!item) return;
 
+  if (!item.chunks.every((chunk) => typeof chunk === 'string')) return;
+
+  await fsp.mkdir(DOWNLOAD_DIR, { recursive: true });
+
+  const filePath = path.join(DOWNLOAD_DIR, item.fileName);
+  const buffer = Buffer.concat(item.chunks.map((chunk) => Buffer.from(chunk, 'base64')));
+
+  await fsp.writeFile(filePath, buffer);
+  delete downloads[transferId];
+  console.log(`Downloaded file saved to ${filePath}`);
+}
 
 async function handlePacket(packet) {
   if (packet.type === 'error') {
@@ -248,27 +240,6 @@ async function runLine(line) {
   console.log('Unknown command. Use /help.');
 }
 
-if (command === '/upload') {
-    const filePath = path.resolve(value);
-    const buffer = await fsp.readFile(filePath);
-    const transferId = newId();
-
-    uploads[transferId] = {
-      requestId: newId(),
-      chunks: splitIntoChunks(buffer),
-    };
-
-    send({
-      type: 'command',
-      clientId,
-      requestId: uploads[transferId].requestId,
-      command: 'upload',
-      fileName: path.basename(filePath),
-      transferId,
-      totalChunks: uploads[transferId].chunks.length,
-    });
-    return;
-  }
 socket.on('message', async (buffer) => {
   try {
     await handlePacket(JSON.parse(buffer.toString()));

@@ -1,4 +1,5 @@
 const dgram = require('dgram');
+const http = require('http');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
@@ -6,18 +7,26 @@ const { execFile } = require('child_process');
 
 const SERVER_IP = process.env.SERVER_IP || '127.0.0.1';
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
+const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const MAX_CLIENTS = Number(process.env.MAX_CLIENTS || 3);
 const CLIENT_TIMEOUT = Number(process.env.CLIENT_TIMEOUT || 30000);
 const CHUNK_SIZE = Number(process.env.CHUNK_SIZE || 4096);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'admin-secret';
 const STORAGE_DIR = path.join(__dirname, 'server-data');
 
-
 const server = dgram.createSocket('udp4');
 const clients = {};
 const uploads = {};
+const recentLogs = [];
+let totalMessages = 0;
+let totalCommands = 0;
+let rejectedClients = 0;
 
-
+function saveLog(text) {
+  recentLogs.push(text);
+  if (recentLogs.length > 50) recentLogs.shift();
+  console.log(text);
+}
 
 function send(address, port, packet) {
   server.send(Buffer.from(JSON.stringify(packet)), port, address);
@@ -42,17 +51,6 @@ function getSafePath(relativePath = '.') {
   return fullPath;
 }
 
-
-function splitIntoChunks(buffer) {
-  const chunks = [];
-
-  for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
-    chunks.push(buffer.subarray(i, i + CHUNK_SIZE).toString('base64'));
-  }
-
-  return chunks.length ? chunks : [''];
-}
-
 async function getAllFiles(folder, base = '') {
   const entries = await fsp.readdir(folder, { withFileTypes: true });
   const result = [];
@@ -71,22 +69,22 @@ async function getAllFiles(folder, base = '') {
   return result;
 }
 
+function splitIntoChunks(buffer) {
+  const chunks = [];
 
-function checkPermission(client, command) {
-  if (client.role === 'admin') return;
-
-  if (['upload', 'delete', 'exec'].includes(command)) {
-    throw new Error('This command needs admin privileges.');
+  for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
+    chunks.push(buffer.subarray(i, i + CHUNK_SIZE).toString('base64'));
   }
+
+  return chunks.length ? chunks : [''];
 }
-
-
 
 function connectClient(packet, rinfo) {
   const current = clients[packet.clientId];
 
   if (!current && getActiveCount() >= MAX_CLIENTS) {
-  
+    rejectedClients += 1;
+    saveLog(`${packet.clientId}: rejected, server full`);
     sendError(rinfo.address, rinfo.port, 'Server is full right now.');
     return;
   }
@@ -94,6 +92,7 @@ function connectClient(packet, rinfo) {
   const now = Date.now();
   const timedOut = current && now - current.lastSeen > CLIENT_TIMEOUT;
   const role = packet.wantAdmin && packet.token === ADMIN_TOKEN ? 'admin' : 'reader';
+  const firstTime = !current;
   const reconnected = current && (!current.active || timedOut);
 
   clients[packet.clientId] = current || {
@@ -110,6 +109,10 @@ function connectClient(packet, rinfo) {
   clients[packet.clientId].role = role;
   clients[packet.clientId].lastSeen = now;
   clients[packet.clientId].active = true;
+
+  if (firstTime) saveLog(`${packet.clientId}: connected as ${role}`);
+  else if (reconnected) saveLog(`${packet.clientId}: reconnected as ${role}`);
+  else saveLog(`${packet.clientId}: refreshed session`);
 
   send(rinfo.address, rinfo.port, {
     type: 'reply',
@@ -134,9 +137,21 @@ function updateClientActivity(packet, rinfo) {
   return client;
 }
 
+function checkPermission(client, command) {
+  if (client.role === 'admin') return;
+
+  if (['upload', 'delete', 'exec'].includes(command)) {
+    throw new Error('This command needs admin privileges.');
+  }
+}
+
 async function handleText(packet, rinfo) {
   const client = updateClientActivity(packet, rinfo);
   if (!client) return;
+
+  client.messageCount += 1;
+  totalMessages += 1;
+  saveLog(`${client.id}: message -> ${packet.text}`);
 
   send(rinfo.address, rinfo.port, {
     type: 'reply',
@@ -145,21 +160,6 @@ async function handleText(packet, rinfo) {
     requestId: packet.requestId,
   });
 }
-
-server.on('message', async (buffer, rinfo) => {
-  try {
-    const packet = JSON.parse(buffer.toString());
-
-    if (packet.type === 'connectMsg') return connectClient(packet, rinfo);
-    if (packet.type === 'Ping') return updateClientActivity(packet, rinfo);
-    if (packet.type === 'text') return handleText(packet, rinfo);
-
-    sendError(rinfo.address, rinfo.port, 'Unknown packet type.');
-  } catch (error) {
-    sendError(rinfo.address, rinfo.port, 'Invalid packet received.');
-  }
-});
-
 
 async function handleUploadChunk(packet, rinfo) {
   const client = updateClientActivity(packet, rinfo);
@@ -191,22 +191,6 @@ async function handleUploadChunk(packet, rinfo) {
     bytes: buffer.length,
     requestId: upload.requestId,
   });
-}
-
-
-async function start() {
-  await fsp.mkdir(STORAGE_DIR, { recursive: true });
-
-  const welcomeFile = path.join(STORAGE_DIR, 'welcome.txt');
-  if (!fs.existsSync(welcomeFile)) {
-    await fsp.writeFile(welcomeFile, 'Welcome to the UDP server folder.');
-  }
-
-  server.bind(UDP_PORT, SERVER_IP, () => {
-    console.log(`UDP server listening on ${SERVER_IP}:${UDP_PORT}`);
-  });
-
-  setInterval(cleanup, 2000).unref();
 }
 
 async function runCommand(client, packet, rinfo) {
@@ -354,6 +338,107 @@ async function runCommand(client, packet, rinfo) {
   }
 
   throw new Error('Unknown command.');
+}
+
+async function handleCommand(packet, rinfo) {
+  const client = updateClientActivity(packet, rinfo);
+  if (!client) return;
+
+  client.messageCount += 1;
+  client.commandCount += 1;
+  totalMessages += 1;
+  totalCommands += 1;
+  saveLog(`${client.id}: requested ${packet.command} ${packet.value || packet.fileName || ''}`.trim());
+
+  try {
+    const reply = await runCommand(client, packet, rinfo);
+    send(rinfo.address, rinfo.port, reply);
+  } catch (error) {
+    saveLog(`${client.id}: error on ${packet.command}`);
+    sendError(rinfo.address, rinfo.port, error.message, packet.requestId);
+  }
+}
+
+function cleanup() {
+  const now = Date.now();
+
+  Object.values(clients).forEach((client) => {
+    if (client.active && now - client.lastSeen > CLIENT_TIMEOUT) {
+      client.active = false;
+      saveLog(`${client.id}: timed out`);
+    }
+  });
+
+  Object.keys(uploads).forEach((transferId) => {
+    if (now - uploads[transferId].startedAt > CLIENT_TIMEOUT * 2) {
+      delete uploads[transferId];
+    }
+  });
+}
+
+server.on('message', async (buffer, rinfo) => {
+  try {
+    const packet = JSON.parse(buffer.toString());
+
+    if (packet.type === 'connectMsg') return connectClient(packet, rinfo);
+    if (packet.type === 'Ping') return updateClientActivity(packet, rinfo);
+    if (packet.type === 'text') return handleText(packet, rinfo);
+    if (packet.type === 'uploadChunk') return handleUploadChunk(packet, rinfo);
+    if (packet.type === 'command') return handleCommand(packet, rinfo);
+
+    sendError(rinfo.address, rinfo.port, 'Unknown packet type.');
+  } catch (error) {
+    sendError(rinfo.address, rinfo.port, 'Invalid packet received.');
+  }
+});
+
+http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/stats') {
+    const clientList = Object.values(clients).map((client) => ({
+      id: client.id,
+      name: client.name,
+      ip: client.address,
+      port: client.port,
+      role: client.role,
+      active: client.active,
+      messages: client.messageCount,
+      commands: client.commandCount,
+    }));
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      serverIp: SERVER_IP,
+      udpPort: UDP_PORT,
+      httpPort: HTTP_PORT,
+      activeConnections: getActiveCount(),
+      rejectedClients,
+      totalMessages,
+      totalCommands,
+      clients: clientList,
+      logs: recentLogs,
+    }, null, 2));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('UDP server is running. Use GET /stats for monitoring.');
+}).listen(HTTP_PORT, SERVER_IP, () => {
+  console.log(`HTTP monitor: http://${SERVER_IP}:${HTTP_PORT}/stats`);
+});
+
+async function start() {
+  await fsp.mkdir(STORAGE_DIR, { recursive: true });
+
+  const welcomeFile = path.join(STORAGE_DIR, 'welcome.txt');
+  if (!fs.existsSync(welcomeFile)) {
+    await fsp.writeFile(welcomeFile, 'Welcome to the UDP server folder.');
+  }
+
+  server.bind(UDP_PORT, SERVER_IP, () => {
+    console.log(`UDP server listening on ${SERVER_IP}:${UDP_PORT}`);
+  });
+
+  setInterval(cleanup, 2000).unref();
 }
 
 start();
